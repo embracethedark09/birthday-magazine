@@ -10,7 +10,7 @@
     <style>
         :root {
             --bg-color: #1a0505; 
-            --shadow-color: rgba(0, 0, 0, 0.7);
+            --shadow-color: rgba(0, 0, 0, 0.6);
         }
 
         * {
@@ -37,52 +37,6 @@
             margin-bottom: 20px;
             text-transform: uppercase;
             opacity: 0.9;
-            text-align: center;
-        }
-
-        /* Container that establishes the 3D space */
-        .scene {
-            width: 100%;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            perspective: 2000px; /* Gives the 3D depth look */
-            height: 70vh;
-        }
-
-        /* The actual book wrapper */
-        .book {
-            position: relative;
-            transform-style: preserve-3d;
-            transition: transform 0.5s ease;
-        }
-
-        /* Individual page wrappers */
-        .book-page {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            transform-origin: left center;
-            transform-style: preserve-3d;
-            transition: transform 0.6s cubic-bezier(0.25, 1, 0.5, 1);
-            box-shadow: 0 4px 20px var(--shadow-color);
-            cursor: pointer;
-        }
-
-        /* Canvas inside the page */
-        canvas {
-            width: 100%;
-            height: 100%;
-            display: block;
-            background: #fff;
-            backface-visibility: hidden; /* Stops page bleeding through back */
-        }
-
-        /* When a page is flipped open to the left */
-        .book-page.flipped {
-            transform: rotateY(-180deg);
         }
 
         #loading {
@@ -91,8 +45,84 @@
             letter-spacing: 1px;
         }
 
+        /* 3D Scene Wrapper */
+        .scene {
+            perspective: 2000px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 65vh;
+            width: 100%;
+        }
+
+        /* The overall double-page book frame */
+        .book {
+            position: relative;
+            transform-style: preserve-3d;
+            transition: transform 0.5s ease;
+        }
+
+        /* A "Sheet" holds two pages: a front page and a back page */
+        .sheet {
+            position: absolute;
+            top: 0;
+            right: 0; /* Align all sheets to the right half of the book initially */
+            width: 50%;
+            height: 100%;
+            transform-origin: left center;
+            transform-style: preserve-3d;
+            transition: transform 0.8s cubic-bezier(0.25, 1, 0.5, 1);
+            z-index: 1;
+        }
+
+        /* Common styles for front and back faces of each sheet */
+        .page-face {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            backface-visibility: hidden;
+            background-color: #fff;
+            box-shadow: inset 3px 0 20px rgba(0,0,0,0.1);
+        }
+
+        /* Front face points towards user */
+        .page-face.front {
+            z-index: 2;
+            transform: rotateY(0deg);
+        }
+
+        /* Back face points away; mirrored horizontally */
+        .page-face.back {
+            transform: rotateY(180deg);
+        }
+
+        /* Canvas rendering element styles */
+        canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+
+        /* Class applied when a sheet is flipped to the left side */
+        .sheet.flipped {
+            transform: rotateY(-180deg);
+        }
+
+        /* Shading/Shadow overlay effect during flip transitions */
+        .page-face::after {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0);
+            transition: background 0.8s ease;
+            pointer-events: none;
+        }
+        .sheet.flipped .front::after { background: rgba(0,0,0,0.2); }
+
         .controls {
-            margin-top: 30px;
+            margin-top: 40px;
             display: flex;
             gap: 15px;
             z-index: 100;
@@ -121,7 +151,7 @@
 
     <h1>✨ Birthday Special: 22nd Edition ✨</h1>
 
-    <div id="loading">Assembling the masterpiece... Please wait.</div>
+    <div id="loading">Assembling the flipbook spreads... Please wait.</div>
 
     <div class="scene">
         <div id="book" class="book"></div>
@@ -136,8 +166,8 @@
         const filename = 'A4 - 11-merged.pdf';
         pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
 
-        let currentPage = 0;
-        let pages = [];
+        let currentSheetIndex = 0;
+        let sheets = [];
 
         async function initBook() {
             const loadingEl = document.getElementById('loading');
@@ -151,88 +181,106 @@
                 const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
                 const totalPages = pdf.numPages;
 
-                // Determine exact responsive dimension sizing
-                const targetHeight = window.innerHeight * 0.65;
+                // Scale sizes to match screen space bounds cleanly
+                const targetHeight = window.innerHeight * 0.62;
                 const firstPage = await pdf.getPage(1);
                 const originalViewport = firstPage.getViewport({ scale: 1.0 });
                 const aspectRatio = originalViewport.width / originalViewport.height;
-                const targetWidth = targetHeight * aspectRatio;
+                const singlePageWidth = targetHeight * aspectRatio;
 
-                // Apply width/height variables dynamically to the layout
-                bookContainer.style.width = targetWidth + 'px';
+                // Set full book wrapper dimension to exactly 2 pages wide
+                bookContainer.style.width = (singlePageWidth * 2) + 'px';
                 bookContainer.style.height = targetHeight + 'px';
 
-                // Render every PDF page into a clean canvas slot
-                for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
-                    const page = await pdf.getPage(pageNum);
-                    
-                    const pageDiv = document.createElement('div');
-                    pageDiv.className = 'book-page';
-                    // Stacking context z-indexing so first page sits on top
-                    pageDiv.style.zIndex = totalPages - pageNum; 
+                // We generate double-sided sheets dynamically.
+                // Sheet 1: Front = Page 1 (Cover), Back = Page 2
+                // Sheet 2: Front = Page 3, Back = Page 4... up to Page 10
+                const totalSheets = Math.ceil(totalPages / 2);
 
-                    const canvas = document.createElement('canvas');
-                    const context = canvas.getContext('2d');
+                for (let s = 0; s < totalSheets; s++) {
+                    const sheetDiv = document.createElement('div');
+                    sheetDiv.className = 'sheet';
+                    sheetDiv.style.zIndex = totalSheets - s;
 
-                    const pageViewport = page.getViewport({ scale: 2.0 }); // High-DPI crisp scale
-                    canvas.height = pageViewport.height;
-                    canvas.width = pageViewport.width;
+                    // Front face container
+                    const frontFace = document.createElement('div');
+                    frontFace.className = 'page-face front';
+                    const canvasFront = document.createElement('canvas');
+                    frontFace.appendChild(canvasFront);
+                    sheetDiv.appendChild(frontFace);
 
-                    pageDiv.appendChild(canvas);
-                    bookContainer.appendChild(pageDiv);
-                    pages.push(pageDiv);
+                    // Back face container
+                    const backFace = document.createElement('div');
+                    backFace.className = 'page-face back';
+                    const canvasBack = document.createElement('canvas');
+                    backFace.appendChild(canvasBack);
+                    sheetDiv.appendChild(backFace);
 
-                    await page.render({ canvasContext: context, viewport: pageViewport }).promise;
+                    bookContainer.appendChild(sheetDiv);
+                    sheets.push(sheetDiv);
+
+                    // Render front page of this sheet
+                    const frontPageNum = (s * 2) + 1;
+                    if (frontPageNum <= totalPages) {
+                        const page = await pdf.getPage(frontPageNum);
+                        const vp = page.getViewport({ scale: 2.0 });
+                        canvasFront.height = vp.height;
+                        canvasFront.width = vp.width;
+                        await page.render({ canvasContext: canvasFront.getContext('2d'), viewport: vp }).promise;
+                    }
+
+                    // Render back page of this sheet
+                    const backPageNum = (s * 2) + 2;
+                    if (backPageNum <= totalPages) {
+                        const page = await pdf.getPage(backPageNum);
+                        const vp = page.getViewport({ scale: 2.0 });
+                        canvasBack.height = vp.height;
+                        canvasBack.width = vp.width;
+                        await page.render({ canvasContext: canvasBack.getContext('2d'), viewport: vp }).promise;
+                    } else {
+                        // If odd number of pages, keep the back cover plain dark crimson color matching background
+                        backFace.style.backgroundColor = 'var(--bg-color)';
+                        canvasBack.style.display = 'none';
+                    }
                 }
 
                 loadingEl.style.display = 'none';
 
-                // Shift book slightly to the right on layout initialization so cover looks perfectly centered
-                bookContainer.style.transform = `translateX(${targetWidth / 2}px)`;
-
-                // Turn page forwarding functions
                 function updateBookState() {
-                    // Adjust the root spine anchor as it flips open to keep the spread centered
-                    if (currentPage === 0) {
-                        bookContainer.style.transform = `translateX(${targetWidth / 2}px)`;
-                    } else if (currentPage === totalPages) {
-                        bookContainer.style.transform = `translateX(${-targetWidth / 2}px)`;
-                    } else {
-                        bookContainer.style.transform = `translateX(0px)`;
-                    }
-
-                    pages.forEach((page, index) => {
-                        if (index < currentPage) {
-                            page.classList.add('flipped');
-                            page.style.zIndex = index; // Move flipped pages out of view index sequence
+                    sheets.forEach((sheet, index) => {
+                        if (index < currentSheetIndex) {
+                            // Sheet is flipped to the left side
+                            sheet.classList.add('flipped');
+                            sheet.style.zIndex = index + 1; 
                         } else {
-                            page.classList.remove('flipped');
-                            page.style.zIndex = totalPages - index; // Maintain layer ordering stack
+                            // Sheet stays on the right side
+                            sheet.classList.remove('flipped');
+                            sheet.style.zIndex = totalSheets - index; 
                         }
                     });
                 }
 
                 document.getElementById('nextBtn').addEventListener('click', () => {
-                    if (currentPage < totalPages) {
-                        currentPage++;
+                    if (currentSheetIndex < sheets.length) {
+                        currentSheetIndex++;
                         updateBookState();
                     }
                 });
 
                 document.getElementById('prevBtn').addEventListener('click', () => {
-                    if (currentPage > 0) {
-                        currentPage--;
+                    if (currentSheetIndex > 0) {
+                        currentSheetIndex--;
                         updateBookState();
                     }
                 });
 
-                // Clicking directly on pages to flip them forwards
-                pages.forEach((page, idx) => {
-                    page.addEventListener('click', () => {
-                        if (idx === currentPage) {
-                            currentPage++;
-                        } else if (idx === currentPage - 1) {
-                            currentPage--;
+                // Let user click directly on pages to flip them back or forth
+                sheets.forEach((sheet, idx) => {
+                    sheet.addEventListener('click', (e) => {
+                        if (idx === currentSheetIndex) {
+                            currentSheetIndex++;
+                        } else if (idx === currentSheetIndex - 1) {
+                            currentSheetIndex--;
                         }
                         updateBookState();
                     });
@@ -240,7 +288,7 @@
 
             } catch (error) {
                 console.error(error);
-                loadingEl.innerText = "Error loading book layout. Ensure paths match exactly.";
+                loadingEl.innerText = "Error configuring spreads. Double check filename paths.";
             }
         }
 

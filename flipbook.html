@@ -5,10 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Atharva's 22nd Birthday Special</title>
     
+    <!-- Dependencies: jQuery and Turn.js for flawless book mechanics -->
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/turn.js/4.1.0/turn.min.js"></script>
     <!-- PDF.js for rendering the PDF pages -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
-    <!-- Page-Flip library for the 3D book animation -->
-    <script src="https://cdn.jsdelivr.net/npm/page-flip@2.0.7/dist/js/page-flip.browser.min.js"></script>
 
     <style>
         :root {
@@ -26,39 +27,38 @@
             align-items: center;
             justify-content: center;
             min-height: 100vh;
-            overflow-x: hidden;
+            overflow: hidden;
         }
 
         h1 {
             color: #fff;
-            font-size: 1.5rem;
+            font-size: 1.4rem;
             letter-spacing: 2px;
-            margin-bottom: 20px;
+            margin-bottom: 15px;
             text-transform: uppercase;
             text-align: center;
-            opacity: 0.8;
+            opacity: 0.9;
         }
 
-        .flipbook-wrapper {
-            position: relative;
+        .viewport {
+            width: 100%;
             display: flex;
             justify-content: center;
             align-items: center;
-            width: 100%;
-            max-width: 1200px;
-            min-height: 75vh;
+            min-height: 70vh;
         }
 
+        /* Container framework for Turn.js */
         #flipbook {
+            margin: 0 auto;
             box-shadow: 0 12px 35px var(--shadow-color);
-            background: #000;
-            visibility: hidden;
+            display: none; /* Kept hidden until PDF loads to avoid layout jumps */
         }
 
-        .page {
+        #flipbook .page {
             background-color: #fff;
-            overflow: hidden;
-            box-sizing: border-box;
+            width: 100%;
+            height: 100%;
         }
 
         canvas {
@@ -70,21 +70,21 @@
         #loading {
             color: #fff;
             font-size: 1.2rem;
-            position: absolute;
-            text-align: center;
+            letter-spacing: 1px;
         }
 
         .controls {
             margin-top: 25px;
             display: flex;
             gap: 15px;
+            z-index: 10;
         }
 
         button {
             background: transparent;
             color: #fff;
             border: 1px solid rgba(255, 255, 255, 0.4);
-            padding: 10px 20px;
+            padding: 10px 22px;
             cursor: pointer;
             text-transform: uppercase;
             font-size: 0.8rem;
@@ -105,7 +105,7 @@
 
     <div id="loading">Assembling the masterpiece... Please wait.</div>
 
-    <div class="flipbook-wrapper">
+    <div class="viewport">
         <div id="flipbook"></div>
     </div>
 
@@ -121,8 +121,8 @@
         pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
 
         async function initFlipbook() {
-            const loadingEl = document.getElementById('loading');
-            const flipbookContainer = document.getElementById('flipbook');
+            const $loading = $('#loading');
+            const $book = $('#flipbook');
 
             try {
                 // Fetch file locally as an array buffer to bypass basic path restriction bugs
@@ -133,72 +133,64 @@
                 const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
                 const totalPages = pdf.numPages;
 
+                // Dynamically gauge sizes based on viewport headroom
                 const firstPage = await pdf.getPage(1);
-                const viewport = firstPage.getViewport({ scale: 1.5 });
+                const originalViewport = firstPage.getViewport({ scale: 1.5 });
                 
-                const pageHeight = Math.min(window.innerHeight * 0.75, viewport.height);
-                const aspectRatio = viewport.width / viewport.height;
-                const pageWidth = pageHeight * aspectRatio;
+                const targetHeight = Math.min(window.innerHeight * 0.70, originalViewport.height);
+                const aspectRatio = originalViewport.width / originalViewport.height;
+                const targetWidth = targetHeight * aspectRatio;
 
+                // Render every single page onto individual canvas sheets sequentially
                 for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
                     const page = await pdf.getPage(pageNum);
-                    
-                    const pageElement = document.createElement('div');
-                    pageElement.className = 'page';
-                    
+                    const $pageDiv = $('<div class="page"></div>');
                     const canvas = document.createElement('canvas');
                     const context = canvas.getContext('2d');
-                    
+
                     const pageViewport = page.getViewport({ scale: 1.5 });
                     canvas.height = pageViewport.height;
                     canvas.width = pageViewport.width;
 
-                    pageElement.appendChild(canvas);
-                    flipbookContainer.appendChild(pageElement);
+                    $pageDiv.append(canvas);
+                    $book.append($pageDiv);
 
                     await page.render({ canvasContext: context, viewport: pageViewport }).promise;
                 }
 
-                loadingEl.style.display = 'none';
-                flipbookContainer.style.visibility = 'visible';
+                // Remove loading screen and reveal layout
+                $loading.hide();
+                $book.show();
 
-                const pageFlip = new St.PageFlip(flipbookContainer, {
-                    width: pageWidth,
-                    height: pageHeight,
-                    size: "fixed",
-                    minWidth: pageWidth,
-                    maxWidth: pageWidth,
-                    minHeight: pageHeight,
-                    maxHeight: pageHeight,
-                    drawShadow: true,
-                    showCover: true,
-                    usePortrait: false
-               const pageFlip = new St.PageFlip(flipbookContainer, {
-    width: pageWidth,
-    height: pageHeight,
-    size: "fixed",
-    minWidth: pageWidth,
-    maxWidth: pageWidth,
-    minHeight: pageHeight,
-    maxHeight: pageHeight,
-    drawShadow: true,
-    showCover: false,     // <-- CHANGED: Disables the hardcover mock spacing
-    usePortrait: false,
-    autoSize: true
-    });
+                // Fire up Turn.js with single cover mode enabled to clear empty margins
+                $book.turn({
+                    width: targetWidth * 2, // Double width for standard two-page spread layout
+                    height: targetHeight,
+                    autoCenter: true,
+                    duration: 1000,
+                    acceleration: true,
+                    elevation: 50,
+                    gradients: true,
+                    display: 'double'
+                });
 
-                pageFlip.loadFromHTML(document.querySelectorAll('.page'));
+                // Control Triggers
+                $('#prevBtn').on('click', () => $book.turn('previous'));
+                $('#nextBtn').on('click', () => $book.turn('next'));
 
-                document.getElementById('prevBtn').addEventListener('click', () => pageFlip.flipPrev());
-                document.getElementById('nextBtn').addEventListener('click', () => pageFlip.flipNext());
+                // Handle arrow keys natively for convenience
+                $(window).on('keydown', (e) => {
+                    if (e.keyCode === 37) $book.turn('previous');
+                    if (e.keyCode === 39) $book.turn('next');
+                });
 
             } catch (error) {
                 console.error(error);
-                loadingEl.innerText = "Error loading book. Make sure 'A4 - 11-merged.pdf' is in the exact same folder on GitHub.";
+                $loading.text("Error loading book. Make sure 'A4 - 11-merged.pdf' is in the exact same folder on GitHub.");
             }
         }
 
-        window.addEventListener('DOMContentLoaded', initFlipbook);
+        $(window).on('load', initFlipbook);
     </script>
 </body>
 </html>

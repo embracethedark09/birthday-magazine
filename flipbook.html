@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Atharva's 22nd Birthday Special</title>
     
+    <!-- PDF.js for rendering the PDF pages -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
     <!-- Page-Flip library for the 3D book animation -->
     <script src="https://cdn.jsdelivr.net/npm/page-flip@2.0.7/dist/js/page-flip.browser.min.js"></script>
 
@@ -44,27 +46,32 @@
             align-items: center;
             width: 100%;
             max-width: 1200px;
+            min-height: 75vh;
         }
 
         #flipbook {
             box-shadow: 0 12px 35px var(--shadow-color);
             background: #000;
+            visibility: hidden;
         }
 
         .page {
-            background-color: #1a0505;
+            background-color: #fff;
             overflow: hidden;
             box-sizing: border-box;
-            display: flex;
-            justify-content: center;
-            align-items: center;
         }
 
-        .page img {
+        canvas {
             width: 100%;
             height: 100%;
-            object-fit: contain;
             display: block;
+        }
+
+        #loading {
+            color: #fff;
+            font-size: 1.2rem;
+            position: absolute;
+            text-align: center;
         }
 
         .controls {
@@ -96,20 +103,10 @@
 
     <h1>✨ Birthday Special: 22nd Edition ✨</h1>
 
+    <div id="loading">Assembling the masterpiece... Please wait.</div>
+
     <div class="flipbook-wrapper">
-        <div id="flipbook">
-            <!-- Hardcoded image pages directly from the source layout -->
-            <div class="page"><img src="https://g.co/gemini/share/a/input_file_0.png" alt="Page 1"></div>
-            <div class="page"><img src="https://g.co/gemini/share/a/input_file_1.png" alt="Page 2"></div>
-            <div class="page"><img src="https://g.co/gemini/share/a/input_file_2.png" alt="Page 3"></div>
-            <div class="page"><img src="https://g.co/gemini/share/a/input_file_3.png" alt="Page 4"></div>
-            <div class="page"><img src="https://g.co/gemini/share/a/input_file_4.png" alt="Page 5"></div>
-            <div class="page"><img src="https://g.co/gemini/share/a/input_file_5.png" alt="Page 6"></div>
-            <div class="page"><img src="https://g.co/gemini/share/a/input_file_6.png" alt="Page 7"></div>
-            <div class="page"><img src="https://g.co/gemini/share/a/input_file_7.png" alt="Page 8"></div>
-            <div class="page"><img src="https://g.co/gemini/share/a/input_file_8.png" alt="Page 9"></div>
-            <div class="page"><img src="https://g.co/gemini/share/a/input_file_9.png" alt="Page 10"></div>
-        </div>
+        <div id="flipbook"></div>
     </div>
 
     <div class="controls">
@@ -118,31 +115,78 @@
     </div>
 
     <script>
-        window.addEventListener('DOMContentLoaded', () => {
+        // Verbatim file reference to your uploaded document
+        const filename = 'A4 - 11-merged.pdf';
+        
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
+
+        async function initFlipbook() {
+            const loadingEl = document.getElementById('loading');
             const flipbookContainer = document.getElementById('flipbook');
 
-            // Based on standard A4 portrait ratio aspect dimensions
-            const pageHeight = Math.min(window.innerHeight * 0.75, 842);
-            const pageWidth = pageHeight * (595 / 842);
+            try {
+                // Fetch file locally as an array buffer to bypass basic path restriction bugs
+                const response = await fetch(encodeURIComponent(filename));
+                if (!response.ok) throw new Error("File not found or server error");
+                const arrayBuffer = await response.arrayBuffer();
 
-            const pageFlip = new St.PageFlip(flipbookContainer, {
-                width: pageWidth,
-                height: pageHeight,
-                size: "fixed",
-                minWidth: pageWidth,
-                maxWidth: pageWidth,
-                minHeight: pageHeight,
-                maxHeight: pageHeight,
-                drawShadow: true,
-                showCover: true,
-                usePortrait: false
-            });
+                const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+                const totalPages = pdf.numPages;
 
-            pageFlip.loadFromHTML(document.querySelectorAll('.page'));
+                const firstPage = await pdf.getPage(1);
+                const viewport = firstPage.getViewport({ scale: 1.5 });
+                
+                const pageHeight = Math.min(window.innerHeight * 0.75, viewport.height);
+                const aspectRatio = viewport.width / viewport.height;
+                const pageWidth = pageHeight * aspectRatio;
 
-            document.getElementById('prevBtn').addEventListener('click', () => pageFlip.flipPrev());
-            document.getElementById('nextBtn').addEventListener('click', () => pageFlip.flipNext());
-        });
+                for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
+                    const page = await pdf.getPage(pageNum);
+                    
+                    const pageElement = document.createElement('div');
+                    pageElement.className = 'page';
+                    
+                    const canvas = document.createElement('canvas');
+                    const context = canvas.getContext('2d');
+                    
+                    const pageViewport = page.getViewport({ scale: 1.5 });
+                    canvas.height = pageViewport.height;
+                    canvas.width = pageViewport.width;
+
+                    pageElement.appendChild(canvas);
+                    flipbookContainer.appendChild(pageElement);
+
+                    await page.render({ canvasContext: context, viewport: pageViewport }).promise;
+                }
+
+                loadingEl.style.display = 'none';
+                flipbookContainer.style.visibility = 'visible';
+
+                const pageFlip = new St.PageFlip(flipbookContainer, {
+                    width: pageWidth,
+                    height: pageHeight,
+                    size: "fixed",
+                    minWidth: pageWidth,
+                    maxWidth: pageWidth,
+                    minHeight: pageHeight,
+                    maxHeight: pageHeight,
+                    drawShadow: true,
+                    showCover: true,
+                    usePortrait: false
+                });
+
+                pageFlip.loadFromHTML(document.querySelectorAll('.page'));
+
+                document.getElementById('prevBtn').addEventListener('click', () => pageFlip.flipPrev());
+                document.getElementById('nextBtn').addEventListener('click', () => pageFlip.flipNext());
+
+            } catch (error) {
+                console.error(error);
+                loadingEl.innerText = "Error loading book. Make sure 'A4 - 11-merged.pdf' is in the exact same folder on GitHub.";
+            }
+        }
+
+        window.addEventListener('DOMContentLoaded', initFlipbook);
     </script>
 </body>
 </html>

@@ -6,6 +6,7 @@
     <title>Atharva's 22nd Birthday Special</title>
     
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/page-flip@2.0.7/dist/js/page-flip.browser.min.js"></script>
 
     <style>
         :root {
@@ -15,8 +16,8 @@
 
         * {
             box-sizing: border-box;
-            user-select: none;
             -webkit-user-select: none;
+            user-select: none;
         }
 
         body {
@@ -39,62 +40,28 @@
             margin-bottom: 20px;
             text-transform: uppercase;
             opacity: 0.9;
+            text-align: center;
         }
 
-        #loading {
-            color: #fff;
-            font-size: 1.2rem;
-        }
-
-        .scene {
-            perspective: 2500px; /* Enhanced perspective depth */
+        .viewport {
+            width: 100%;
             display: flex;
             justify-content: center;
             align-items: center;
             height: 65vh;
-            width: 100%;
         }
 
-        .book {
-            position: relative;
-            transform-style: preserve-3d;
-            transition: transform 0.6s cubic-bezier(0.2, 1, 0.3, 1);
+        /* The canvas framework container required by PageFlip */
+        #flipbook {
+            box-shadow: 0 12px 40px var(--shadow-color);
+            visibility: hidden; /* Kept hidden until pages render perfectly */
         }
 
-        .sheet {
-            position: absolute;
-            top: 0;
-            right: 0;
-            width: 50%;
-            height: 100%;
-            transform-origin: left center;
-            transform-style: preserve-3d;
-            transition: transform 0.9s cubic-bezier(0.25, 1, 0.4, 1);
-            cursor: grab;
-            z-index: 1;
-        }
-
-        .sheet:active {
-            cursor: grabbing;
-        }
-
-        .page-face {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            backface-visibility: hidden;
+        .page {
             background-color: #fff;
-        }
-
-        .page-face.front {
-            z-index: 2;
-            transform: rotateY(0deg);
-        }
-
-        .page-face.back {
-            transform: rotateY(180deg);
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
         }
 
         canvas {
@@ -103,33 +70,14 @@
             display: block;
         }
 
-        .sheet.flipped {
-            transform: rotateY(-180deg);
+        #loading {
+            color: #fff;
+            font-size: 1.2rem;
+            letter-spacing: 1px;
         }
-
-        /* Organic Spine Shadow Overlay */
-        .page-face::after {
-            content: '';
-            position: absolute;
-            top: 0; left: 0; width: 100%; height: 100%;
-            pointer-events: none;
-            transition: background 0.9s cubic-bezier(0.25, 1, 0.4, 1);
-        }
-
-        /* Soft gradient fold shadow over the canvas as it closes/opens */
-        .front::after {
-            background: linear-gradient(to right, rgba(0,0,0,0.15) 0%, rgba(0,0,0,0) 10%);
-        }
-        .back::after {
-            background: linear-gradient(to left, rgba(0,0,0,0.15) 0%, rgba(0,0,0,0) 10%);
-        }
-
-        /* Darken sheets deeply when they are mid-flip transition */
-        .sheet.flipped .front::after { background: rgba(0,0,0,0.25); }
-        .sheet:not(.flipped) .back::after { background: rgba(0,0,0,0.25); }
 
         .controls {
-            margin-top: 40px;
+            margin-top: 35px;
             display: flex;
             gap: 15px;
             z-index: 100;
@@ -160,8 +108,8 @@
 
     <div id="loading">Assembling the flipbook spreads... Please wait.</div>
 
-    <div class="scene">
-        <div id="book" class="book"></div>
+    <div class="viewport">
+        <div id="flipbook"></div>
     </div>
 
     <div class="controls">
@@ -173,14 +121,9 @@
         const filename = 'A4 - 11-merged.pdf';
         pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
 
-        let currentSheetIndex = 0;
-        let sheets = [];
-        let isDragging = false;
-        let startX = 0;
-
         async function initBook() {
             const loadingEl = document.getElementById('loading');
-            const bookContainer = document.getElementById('book');
+            const flipbookContainer = document.getElementById('flipbook');
 
             try {
                 const response = await fetch(encodeURIComponent(filename));
@@ -190,132 +133,68 @@
                 const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
                 const totalPages = pdf.numPages;
 
+                // Scale sizes to match screen space bounds cleanly
                 const targetHeight = window.innerHeight * 0.62;
                 const firstPage = await pdf.getPage(1);
                 const originalViewport = firstPage.getViewport({ scale: 1.0 });
                 const aspectRatio = originalViewport.width / originalViewport.height;
                 const singlePageWidth = targetHeight * aspectRatio;
 
-                bookContainer.style.width = (singlePageWidth * 2) + 'px';
-                bookContainer.style.height = targetHeight + 'px';
+                // Render all pages as high-res canvas layers sequentially
+                for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
+                    const page = await pdf.getPage(pageNum);
+                    
+                    const pageDiv = document.createElement('div');
+                    pageDiv.className = 'page';
 
-                const totalSheets = Math.ceil(totalPages / 2);
+                    const canvas = document.createElement('canvas');
+                    const context = canvas.getContext('2d');
 
-                for (let s = 0; s < totalSheets; s++) {
-                    const sheetDiv = document.createElement('div');
-                    sheetDiv.className = 'sheet';
-                    sheetDiv.style.zIndex = totalSheets - s;
+                    const pageViewport = page.getViewport({ scale: 2.0 }); // 2x scale for sharp graphics
+                    canvas.height = pageViewport.height;
+                    canvas.width = pageViewport.width;
 
-                    const frontFace = document.createElement('div');
-                    frontFace.className = 'page-face front';
-                    const canvasFront = document.createElement('canvas');
-                    frontFace.appendChild(canvasFront);
-                    sheetDiv.appendChild(frontFace);
+                    pageDiv.appendChild(canvas);
+                    flipbookContainer.appendChild(pageDiv);
 
-                    const backFace = document.createElement('div');
-                    backFace.className = 'page-face back';
-                    const canvasBack = document.createElement('canvas');
-                    backFace.appendChild(canvasBack);
-                    sheetDiv.appendChild(backFace);
-
-                    bookContainer.appendChild(sheetDiv);
-                    sheets.push(sheetDiv);
-
-                    // Front rendering
-                    const frontPageNum = (s * 2) + 1;
-                    if (frontPageNum <= totalPages) {
-                        const page = await pdf.getPage(frontPageNum);
-                        const vp = page.getViewport({ scale: 2.0 });
-                        canvasFront.height = vp.height;
-                        canvasFront.width = vp.width;
-                        await page.render({ canvasContext: canvasFront.getContext('2d'), viewport: vp }).promise;
-                    }
-
-                    // Back rendering
-                    const backPageNum = (s * 2) + 2;
-                    if (backPageNum <= totalPages) {
-                        const page = await pdf.getPage(backPageNum);
-                        const vp = page.getViewport({ scale: 2.0 });
-                        canvasBack.height = vp.height;
-                        canvasBack.width = vp.width;
-                        await page.render({ canvasContext: canvasBack.getContext('2d'), viewport: vp }).promise;
-                    } else {
-                        backFace.style.backgroundColor = 'var(--bg-color)';
-                        canvasBack.style.display = 'none';
-                    }
+                    await page.render({ canvasContext: context, viewport: pageViewport }).promise;
                 }
 
                 loadingEl.style.display = 'none';
+                flipbookContainer.style.visibility = 'visible';
 
-                function updateBookState() {
-                    sheets.forEach((sheet, index) => {
-                        if (index < currentSheetIndex) {
-                            sheet.classList.add('flipped');
-                            // Dynamic z-index layering avoids physical page clipping during mid-flight arcing
-                            sheet.style.zIndex = index + 10; 
-                        } else {
-                            sheet.classList.remove('flipped');
-                            sheet.style.zIndex = totalSheets - index; 
-                        }
-                    });
-                }
-
-                // Interactive Pointer Swipe/Drag Event Configuration
-                window.addEventListener('pointerdown', (e) => {
-                    if (e.target.closest('.controls') || e.target.closest('button')) return;
-                    isDragging = true;
-                    startX = e.clientX;
+                // Initialize the professional engine
+                const pageFlip = new St.PageFlip(flipbookContainer, {
+                    width: singlePageWidth,
+                    height: targetHeight,
+                    size: "fixed",
+                    minWidth: singlePageWidth,
+                    maxWidth: singlePageWidth,
+                    minHeight: targetHeight,
+                    maxHeight: targetHeight,
+                    drawShadow: true,
+                    showCover: false,      // Removes empty back borders entirely
+                    usePortrait: false,    // Forces clean side-by-side spreads on landscape windows
+                    flippingTime: 1000,
+                    swipeDistance: 30,     // Drag sensitivity parameter
+                    useMouseEvents: true   // Explicitly allows desktop mouse dragging/swiping
                 });
 
-                window.addEventListener('pointermove', (e) => {
-                    if (!isDragging) return;
-                    const deltaX = e.clientX - startX;
-                    
-                    // Pulling page left -> Turn forward
-                    if (deltaX < -60) {
-                        if (currentSheetIndex < sheets.length) {
-                            currentSheetIndex++;
-                            updateBookState();
-                            isDragging = false;
-                        }
-                    } 
-                    // Pulling page right -> Turn backward
-                    else if (deltaX > 60) {
-                        if (currentSheetIndex > 0) {
-                            currentSheetIndex--;
-                            updateBookState();
-                            isDragging = false;
-                        }
-                    }
-                });
+                pageFlip.loadFromHTML(document.querySelectorAll('.page'));
 
-                window.addEventListener('pointerup', () => {
-                    isDragging = false;
-                });
+                // Connect Control Buttons
+                document.getElementById('prevBtn').addEventListener('click', () => pageFlip.flipPrev());
+                document.getElementById('nextBtn').addEventListener('click', () => pageFlip.flipNext());
 
-                // Controls Fallbacks
-                document.getElementById('nextBtn').addEventListener('click', () => {
-                    if (currentSheetIndex < sheets.length) {
-                        currentSheetIndex++;
-                        updateBookState();
-                    }
-                });
-
-                document.getElementById('prevBtn').addEventListener('click', () => {
-                    if (currentSheetIndex > 0) {
-                        currentSheetIndex--;
-                        updateBookState();
-                    }
-                });
-
-                $(window).on('keydown', (e) => {
-                    if (e.keyCode === 37) { if (currentSheetIndex > 0) { currentSheetIndex--; updateBookState(); } }
-                    if (e.keyCode === 39) { if (currentSheetIndex < sheets.length) { currentSheetIndex++; updateBookState(); } }
+                // Hotkey bindings for convenience
+                window.addEventListener('keydown', (e) => {
+                    if (e.keyCode === 37) pageFlip.flipPrev();
+                    if (e.keyCode === 39) pageFlip.flipNext();
                 });
 
             } catch (error) {
                 console.error(error);
-                loadingEl.innerText = "Error loading layouts.";
+                loadingEl.innerText = "Error initializing engine parameters.";
             }
         }
 

@@ -5,21 +5,23 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Atharva's 22nd Birthday Special</title>
     
-    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/turn.js/4.1.0/turn.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
 
     <style>
         :root {
             --bg-color: #1a0505; 
-            --shadow-color: rgba(0, 0, 0, 0.6);
+            --shadow-color: rgba(0, 0, 0, 0.7);
+        }
+
+        * {
+            box-sizing: border-box;
         }
 
         body {
             margin: 0;
             padding: 0;
             background-color: var(--bg-color);
-            font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            font-family: system-ui, -apple-system, sans-serif;
             display: flex;
             flex-direction: column;
             align-items: center;
@@ -32,36 +34,55 @@
             color: #fff;
             font-size: 1.4rem;
             letter-spacing: 2px;
-            margin-bottom: 15px;
+            margin-bottom: 20px;
             text-transform: uppercase;
-            text-align: center;
             opacity: 0.9;
+            text-align: center;
         }
 
-        .viewport {
+        /* Container that establishes the 3D space */
+        .scene {
             width: 100%;
             display: flex;
             justify-content: center;
             align-items: center;
-            height: 75vh;
+            perspective: 2000px; /* Gives the 3D depth look */
+            height: 70vh;
         }
 
-        #flipbook {
-            margin: 0 auto;
-            box-shadow: 0 12px 35px var(--shadow-color);
-            display: none;
+        /* The actual book wrapper */
+        .book {
+            position: relative;
+            transform-style: preserve-3d;
+            transition: transform 0.5s ease;
         }
 
-        #flipbook .page {
-            background-color: #fff;
+        /* Individual page wrappers */
+        .book-page {
+            position: absolute;
+            top: 0;
+            left: 0;
             width: 100%;
             height: 100%;
+            transform-origin: left center;
+            transform-style: preserve-3d;
+            transition: transform 0.6s cubic-bezier(0.25, 1, 0.5, 1);
+            box-shadow: 0 4px 20px var(--shadow-color);
+            cursor: pointer;
         }
 
+        /* Canvas inside the page */
         canvas {
             width: 100%;
             height: 100%;
             display: block;
+            background: #fff;
+            backface-visibility: hidden; /* Stops page bleeding through back */
+        }
+
+        /* When a page is flipped open to the left */
+        .book-page.flipped {
+            transform: rotateY(-180deg);
         }
 
         #loading {
@@ -71,10 +92,10 @@
         }
 
         .controls {
-            margin-top: 25px;
+            margin-top: 30px;
             display: flex;
             gap: 15px;
-            z-index: 10;
+            z-index: 100;
         }
 
         button {
@@ -102,8 +123,8 @@
 
     <div id="loading">Assembling the masterpiece... Please wait.</div>
 
-    <div class="viewport">
-        <div id="flipbook"></div>
+    <div class="scene">
+        <div id="book" class="book"></div>
     </div>
 
     <div class="controls">
@@ -115,9 +136,12 @@
         const filename = 'A4 - 11-merged.pdf';
         pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
 
-        async function initFlipbook() {
-            const $loading = $('#loading');
-            const $book = $('#flipbook');
+        let currentPage = 0;
+        let pages = [];
+
+        async function initBook() {
+            const loadingEl = document.getElementById('loading');
+            const bookContainer = document.getElementById('book');
 
             try {
                 const response = await fetch(encodeURIComponent(filename));
@@ -127,77 +151,100 @@
                 const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
                 const totalPages = pdf.numPages;
 
-                // Restrict max height strictly to 70% of user's screen height to prevent blowing up
-                const targetHeight = window.innerHeight * 0.70;
+                // Determine exact responsive dimension sizing
+                const targetHeight = window.innerHeight * 0.65;
                 const firstPage = await pdf.getPage(1);
                 const originalViewport = firstPage.getViewport({ scale: 1.0 });
                 const aspectRatio = originalViewport.width / originalViewport.height;
                 const targetWidth = targetHeight * aspectRatio;
 
-                // Render pages
+                // Apply width/height variables dynamically to the layout
+                bookContainer.style.width = targetWidth + 'px';
+                bookContainer.style.height = targetHeight + 'px';
+
+                // Render every PDF page into a clean canvas slot
                 for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
                     const page = await pdf.getPage(pageNum);
-                    const $pageDiv = $('<div class="page"></div>');
+                    
+                    const pageDiv = document.createElement('div');
+                    pageDiv.className = 'book-page';
+                    // Stacking context z-indexing so first page sits on top
+                    pageDiv.style.zIndex = totalPages - pageNum; 
+
                     const canvas = document.createElement('canvas');
                     const context = canvas.getContext('2d');
 
-                    // Scale rendering to 2x for high resolution text sharpness
-                    const pageViewport = page.getViewport({ scale: 2.0 });
+                    const pageViewport = page.getViewport({ scale: 2.0 }); // High-DPI crisp scale
                     canvas.height = pageViewport.height;
                     canvas.width = pageViewport.width;
 
-                    $pageDiv.append(canvas);
-                    $book.append($pageDiv);
+                    pageDiv.appendChild(canvas);
+                    bookContainer.appendChild(pageDiv);
+                    pages.push(pageDiv);
 
                     await page.render({ canvasContext: context, viewport: pageViewport }).promise;
                 }
 
-                $loading.hide();
-                $book.show();
+                loadingEl.style.display = 'none';
 
-                // Initialize turn.js with explicitly configured dimension bounds
-                $book.turn({
-                    width: targetWidth * 2, 
-                    height: targetHeight,
-                    autoCenter: true,
-                    duration: 800,
-                    acceleration: true,
-                    elevation: 50,
-                    gradients: true,
-                    display: 'double',
-                    // This explicitly prevents blank spaces at the start and end:
-                    when: {
-                        turning: function(event, page, pageObj) {
-                            if (page == 1 || page == totalPages) {
-                                $book.turn('display', 'single');
-                            } else {
-                                $book.turn('display', 'double');
-                            }
+                // Shift book slightly to the right on layout initialization so cover looks perfectly centered
+                bookContainer.style.transform = `translateX(${targetWidth / 2}px)`;
+
+                // Turn page forwarding functions
+                function updateBookState() {
+                    // Adjust the root spine anchor as it flips open to keep the spread centered
+                    if (currentPage === 0) {
+                        bookContainer.style.transform = `translateX(${targetWidth / 2}px)`;
+                    } else if (currentPage === totalPages) {
+                        bookContainer.style.transform = `translateX(${-targetWidth / 2}px)`;
+                    } else {
+                        bookContainer.style.transform = `translateX(0px)`;
+                    }
+
+                    pages.forEach((page, index) => {
+                        if (index < currentPage) {
+                            page.classList.add('flipped');
+                            page.style.zIndex = index; // Move flipped pages out of view index sequence
+                        } else {
+                            page.classList.remove('flipped');
+                            page.style.zIndex = totalPages - index; // Maintain layer ordering stack
                         }
+                    });
+                }
+
+                document.getElementById('nextBtn').addEventListener('click', () => {
+                    if (currentPage < totalPages) {
+                        currentPage++;
+                        updateBookState();
                     }
                 });
 
-                // Set initial state for page 1
-                if ($book.turn('page') == 1) {
-                    $book.turn('display', 'single');
-                }
+                document.getElementById('prevBtn').addEventListener('click', () => {
+                    if (currentPage > 0) {
+                        currentPage--;
+                        updateBookState();
+                    }
+                });
 
-                // Controls
-                $('#prevBtn').on('click', () => $book.turn('previous'));
-                $('#nextBtn').on('click', () => $book.turn('next'));
-
-                $(window).on('keydown', (e) => {
-                    if (e.keyCode === 37) $book.turn('previous');
-                    if (e.keyCode === 39) $book.turn('next');
+                // Clicking directly on pages to flip them forwards
+                pages.forEach((page, idx) => {
+                    page.addEventListener('click', () => {
+                        if (idx === currentPage) {
+                            currentPage++;
+                        } else if (idx === currentPage - 1) {
+                            currentPage--;
+                        }
+                        updateBookState();
+                    });
                 });
 
             } catch (error) {
                 console.error(error);
-                $loading.text("Error loading book. Check filename matching.");
+                loadingEl.innerText = "Error loading book layout. Ensure paths match exactly.";
             }
         }
 
-        $(window).on('load', initFlipbook);
+        window.addEventListener('DOMContentLoaded', initBook);
     </script>
 </body>
 </html>

@@ -173,7 +173,19 @@
                     drawShadow: true,
                     showCover: true,
                     usePortrait: false
-                });
+               const pageFlip = new St.PageFlip(flipbookContainer, {
+    width: pageWidth,
+    height: pageHeight,
+    size: "fixed",
+    minWidth: pageWidth,
+    maxWidth: pageWidth,
+    minHeight: pageHeight,
+    maxHeight: pageHeight,
+    drawShadow: true,
+    showCover: false,     // <-- CHANGED: Disables the hardcover mock spacing
+    usePortrait: false,
+    autoSize: true
+    });
 
                 pageFlip.loadFromHTML(document.querySelectorAll('.page'));
 

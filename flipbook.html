@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Atharva's 22nd Birthday Special</title>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/page-flip@2.0.7/dist/js/page-flip.browser.min.js"></script>
+
+    <style>
+        :root {
+            --bg-color: #1a0505; /* Deep dark crimson tone matching the theme */
+            --shadow-color: rgba(0, 0, 0, 0.5);
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: var(--bg-color);
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        h1 {
+            color: #fff;
+            font-size: 1.5rem;
+            letter-spacing: 2px;
+            margin-bottom: 20px;
+            text-transform: uppercase;
+            text-align: center;
+            opacity: 0.8;
+        }
+
+        /* Container for the flipbook app */
+        .flipbook-wrapper {
+            position: relative;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            width: 100%;
+            max-width: 1200px;
+        }
+
+        /* The actual book container element required by Page-Flip */
+        #flipbook {
+            box-shadow: 0 12px 30px var(--shadow-color);
+            visibility: hidden; /* Hidden initially until PDF renders */
+            background: #000;
+        }
+
+        /* Styling for individual pages inside the book */
+        .page {
+            background-color: #fff;
+            overflow: hidden;
+            box-sizing: border-box;
+        }
+
+        canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+
+        /* Simple loading state */
+        #loading {
+            color: #fff;
+            font-size: 1.2rem;
+            position: absolute;
+        }
+
+        /* Navigation controls */
+        .controls {
+            margin-top: 25px;
+            display: flex;
+            gap: 15px;
+        }
+
+        button {
+            background: transparent;
+            color: #fff;
+            border: 1px solid rgba(255, 255, 255, 0.4);
+            padding: 10px 20px;
+            cursor: pointer;
+            text-transform: uppercase;
+            font-size: 0.8rem;
+            letter-spacing: 1px;
+            transition: all 0.3s ease;
+        }
+
+        button:hover {
+            background: #fff;
+            color: var(--bg-color);
+            border-color: #fff;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>✨ Birthday Special: 22nd Edition ✨</h1>
+
+    <div id="loading">Assembling the masterpiece...</div>
+
+    <div class="flipbook-wrapper">
+        <div id="flipbook"></div>
+    </div>
+
+    <div class="controls">
+        <button id="prevBtn">Previous</button>
+        <button id="nextBtn">Next</button>
+    </div>
+
+    <script>
+        // Points to your uploaded PDF path
+        const pdfUrl = 'A4 - 11-merged.pdf'; 
+        
+        // Configure PDF.js worker path
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
+
+        let pageFlip = null;
+
+        async function initFlipbook() {
+            const loadingEl = document.getElementById('loading');
+            const flipbookContainer = document.getElementById('flipbook');
+
+            try {
+                // 1. Load the target PDF document
+                const pdf = await pdfjsLib.getDocument(pdfUrl).promise;
+                const totalPages = pdf.numPages;
+
+                // 2. Fetch the first page to compute the aspect ratio dynamically
+                const firstPage = await pdf.getPage(1);
+                const viewport = firstPage.getViewport({ scale: 2.0 }); // Higher scale renders sharp details
+                
+                // Book dimensions based on typical screen height allocations
+                const pageHeight = Math.min(window.innerHeight * 0.75, viewport.height / 2);
+                const aspectRatio = viewport.width / viewport.height;
+                const pageWidth = pageHeight * aspectRatio;
+
+                // 3. Render all pages sequentially into the flipbook element
+                for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
+                    const page = await pdf.getPage(pageNum);
+                    
+                    const pageElement = document.createElement('div');
+                    pageElement.className = 'page';
+                    
+                    const canvas = document.createElement('canvas');
+                    const context = canvas.getContext('2d');
+                    
+                    // Set native canvas size to match the scaled viewport
+                    const pageViewport = page.getViewport({ scale: 2.0 });
+                    canvas.height = pageViewport.height;
+                    canvas.width = pageViewport.width;
+
+                    pageElement.appendChild(canvas);
+                    flipbookContainer.appendChild(pageElement);
+
+                    // Render into context
+                    await page.render({ canvasContext: context, viewport: pageViewport }).promise;
+                }
+
+                // Remove loading display, make element active
+                loadingEl.style.display = 'none';
+                flipbookContainer.style.visibility = 'visible';
+
+                // 4. Initialize the PageFlip core module
+                pageFlip = new St.PageFlip(flipbookContainer, {
+                    width: pageWidth,
+                    height: pageHeight,
+                    size: "fixed",
+                    minWidth: pageWidth,
+                    maxWidth: pageWidth,
+                    minHeight: pageHeight,
+                    maxHeight: pageHeight,
+                    drawShadow: true,
+                    showCover: true, // Displays Page 1 as a single cover page
+                    usePortrait: false // Keeps double-page spreads functional on large views
+                });
+
+                pageFlip.loadFromHTML(document.querySelectorAll('.page'));
+
+                // 5. Connect Navigation Hooks
+                document.getElementById('prevBtn').addEventListener('click', () => pageFlip.flipPrev());
+                document.getElementById('nextBtn').addEventListener('click', () => pageFlip.flipNext());
+
+            } catch (error) {
+                console.error("Error creating flipbook: ", error);
+                loadingEl.innerText = "Failed to load PDF. Check filename matches perfectly.";
+            }
+        }
+
+        window.addEventListener('DOMContentLoaded', initFlipbook);
+    </script>
+</body>
+</html>

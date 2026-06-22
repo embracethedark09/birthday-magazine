@@ -5,10 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Atharva's 22nd Birthday Special</title>
     
-    <!-- Dependencies: jQuery and Turn.js for flawless book mechanics -->
     <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/turn.js/4.1.0/turn.min.js"></script>
-    <!-- PDF.js for rendering the PDF pages -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
 
     <style>
@@ -45,14 +43,13 @@
             display: flex;
             justify-content: center;
             align-items: center;
-            min-height: 70vh;
+            height: 75vh;
         }
 
-        /* Container framework for Turn.js */
         #flipbook {
             margin: 0 auto;
             box-shadow: 0 12px 35px var(--shadow-color);
-            display: none; /* Kept hidden until PDF loads to avoid layout jumps */
+            display: none;
         }
 
         #flipbook .page {
@@ -115,9 +112,7 @@
     </div>
 
     <script>
-        // Verbatim file reference to your uploaded document
         const filename = 'A4 - 11-merged.pdf';
-        
         pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
 
         async function initFlipbook() {
@@ -125,30 +120,29 @@
             const $book = $('#flipbook');
 
             try {
-                // Fetch file locally as an array buffer to bypass basic path restriction bugs
                 const response = await fetch(encodeURIComponent(filename));
-                if (!response.ok) throw new Error("File not found or server error");
+                if (!response.ok) throw new Error("File not found");
                 const arrayBuffer = await response.arrayBuffer();
 
                 const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
                 const totalPages = pdf.numPages;
 
-                // Dynamically gauge sizes based on viewport headroom
+                // Restrict max height strictly to 70% of user's screen height to prevent blowing up
+                const targetHeight = window.innerHeight * 0.70;
                 const firstPage = await pdf.getPage(1);
-                const originalViewport = firstPage.getViewport({ scale: 1.5 });
-                
-                const targetHeight = Math.min(window.innerHeight * 0.70, originalViewport.height);
+                const originalViewport = firstPage.getViewport({ scale: 1.0 });
                 const aspectRatio = originalViewport.width / originalViewport.height;
                 const targetWidth = targetHeight * aspectRatio;
 
-                // Render every single page onto individual canvas sheets sequentially
+                // Render pages
                 for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
                     const page = await pdf.getPage(pageNum);
                     const $pageDiv = $('<div class="page"></div>');
                     const canvas = document.createElement('canvas');
                     const context = canvas.getContext('2d');
 
-                    const pageViewport = page.getViewport({ scale: 1.5 });
+                    // Scale rendering to 2x for high resolution text sharpness
+                    const pageViewport = page.getViewport({ scale: 2.0 });
                     canvas.height = pageViewport.height;
                     canvas.width = pageViewport.width;
 
@@ -158,27 +152,40 @@
                     await page.render({ canvasContext: context, viewport: pageViewport }).promise;
                 }
 
-                // Remove loading screen and reveal layout
                 $loading.hide();
                 $book.show();
 
-                // Fire up Turn.js with single cover mode enabled to clear empty margins
+                // Initialize turn.js with explicitly configured dimension bounds
                 $book.turn({
-                    width: targetWidth * 2, // Double width for standard two-page spread layout
+                    width: targetWidth * 2, 
                     height: targetHeight,
                     autoCenter: true,
-                    duration: 1000,
+                    duration: 800,
                     acceleration: true,
                     elevation: 50,
                     gradients: true,
-                    display: 'double'
+                    display: 'double',
+                    // This explicitly prevents blank spaces at the start and end:
+                    when: {
+                        turning: function(event, page, pageObj) {
+                            if (page == 1 || page == totalPages) {
+                                $book.turn('display', 'single');
+                            } else {
+                                $book.turn('display', 'double');
+                            }
+                        }
+                    }
                 });
 
-                // Control Triggers
+                // Set initial state for page 1
+                if ($book.turn('page') == 1) {
+                    $book.turn('display', 'single');
+                }
+
+                // Controls
                 $('#prevBtn').on('click', () => $book.turn('previous'));
                 $('#nextBtn').on('click', () => $book.turn('next'));
 
-                // Handle arrow keys natively for convenience
                 $(window).on('keydown', (e) => {
                     if (e.keyCode === 37) $book.turn('previous');
                     if (e.keyCode === 39) $book.turn('next');
@@ -186,7 +193,7 @@
 
             } catch (error) {
                 console.error(error);
-                $loading.text("Error loading book. Make sure 'A4 - 11-merged.pdf' is in the exact same folder on GitHub.");
+                $loading.text("Error loading book. Check filename matching.");
             }
         }
 
